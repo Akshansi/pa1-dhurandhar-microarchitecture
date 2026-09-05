@@ -33,6 +33,8 @@ static constexpr int kReps = 3;
 // Default workload and seed. Square M=N=K=kDefN. (Chosen so the working set exceeds L2, so
 // cache tiling matters, while the run stays tolerable.)
 static constexpr int kDefN = 1024;
+static constexpr int mDefN = 1024;
+static constexpr int nDefN = 1024;
 static constexpr unsigned kDefSeed = 1234u;
 
 // Scoring: 3 scored stages (simd, prefetch, optimized).
@@ -203,7 +205,7 @@ int main(int argc, char** argv) {
         else
             std::printf("[smoke] all stages match the reference on a small input.\n");
 
-        run_config(kDefN, kDefN, kDefN, kDefSeed, nullptr, /*show=*/true, /*scored=*/true);
+        run_config(kDefN, mDefN, nDefN, kDefSeed, nullptr, /*show=*/true, /*scored=*/true);
         std::printf(
             "\nhint: cache blocking's payoff grows with size. Try a bigger matmul, e.g.\n"
             "      ./bin/matmul all 2048 2048 2048   (watch simd vs optimized diverge).\n");
@@ -223,7 +225,7 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    int M = kDefN, N = kDefN, K = kDefN;
+    int M = mDefN, N = nDefN, K = kDefN;
     unsigned seed = kDefSeed;
     if (argc >= 5) {
         M = std::atoi(argv[2]);

@@ -1,4 +1,4 @@
-// matmul_simd.cpp  STAGE 1: SIMD with AVX-512 intrinsics
+// matmul_simd.cpp  STAGE 1: SIMD with 128-bit intrinsics
 #include <immintrin.h>
 
 #include "matmul.h"
@@ -15,16 +15,14 @@ void matmul_simd(const float* A, const float* B, float* C,
 
             int batch = m < (N - j) ? m : (N - j);
 
-            // AVX-512 accumulators
-            __m512 acc[4];
+            // 128-bit SIMD accumulators
+            __m128 acc[4];
 
-            // Scalar accumulators for K leftovers
-            float scalar_acc[4] = {
-                0.0f, 0.0f, 0.0f, 0.0f
-            };
+            // Scalar accumulators for the K leftovers
+            float scalar_acc[4] = {0.0f, 0.0f, 0.0f, 0.0f};
 
             for (int k = 0; k < batch; k++) {
-                acc[k] = _mm512_setzero_ps();
+                acc[k] = _mm_setzero_ps();
             }
 
             // -------------------------
@@ -32,26 +30,25 @@ void matmul_simd(const float* A, const float* B, float* C,
             // -------------------------
             int p = 0;
 
-            // 512 bits = 16 floats
-            for (; p + 15 < K; p += 16) {
+            // 128 bits = 4 floats
+            for (; p + 3 < K; p += 4) {
 
-                // Load 16 values from A
-                __m512 a = _mm512_loadu_ps(
+                // Load 4 values from A
+                __m128 a = _mm_loadu_ps(
                     &A[i * lda + p]
                 );
 
                 for (int k = 0; k < batch; k++) {
 
-                    // Load 16 values from B
-                    __m512 b = _mm512_loadu_ps(
+                    // Load 4 values from B
+                    __m128 b = _mm_loadu_ps(
                         &B[(j + k) * ldb + p]
                     );
 
                     // acc[k] += a * b
-                    acc[k] = _mm512_fmadd_ps(
-                        a,
-                        b,
-                        acc[k]
+                    acc[k] = _mm_add_ps(
+                        acc[k],
+                        _mm_mul_ps(a, b)
                     );
                 }
             }
@@ -74,15 +71,15 @@ void matmul_simd(const float* A, const float* B, float* C,
             // -------------------------
             for (int k = 0; k < batch; k++) {
 
-                alignas(64) float temp[16];
+                alignas(16) float temp[4];
 
-                // Convert AVX-512 accumulator
-                // into 16 scalar values
-                _mm512_store_ps(temp, acc[k]);
+                // Convert the 128-bit accumulator
+                // into 4 scalar values
+                _mm_store_ps(temp, acc[k]);
 
                 float sum = 0.0f;
 
-                for (int x = 0; x < 16; x++) {
+                for (int x = 0; x < 4; x++) {
                     sum += temp[x];
                 }
 
