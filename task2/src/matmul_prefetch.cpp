@@ -1,128 +1,80 @@
-// matmul_prefetch.cpp  STAGE 2: CACHE BLOCKING + SOFTWARE PREFETCHING
+// matmul_prefetch.cpp
+// STAGE 2: CACHE BLOCKING + SOFTWARE PREFETCHING
 
 #include <immintrin.h>
 
 #include "matmul.h"
 
-void matmul_prefetch(const float* A, const float* B, float* C,
-                     int M, int N, int K, int lda, int ldb, int ldc) {
-    const int m = 4;
-    // Cache tile sizes
-    const int BM = 32;
-    const int BN = 32;
-    const int PREFETCH_DISTANCE = 64;
-    for (int i0 = 0; i0 < M; i0 += BM) {
+// 0 = Software prefetch OFF
+// 1 = Software prefetch ON
+#define SOFTWARE_PREFETCH 1
 
-        int i_end = (i0 + BM < M) ? i0 + BM : M;
+#define PREFETCH_DISTANCE 16
 
-        for (int j0 = 0; j0 < N; j0 += BN) {
+// Cache fill:
+// 0 = NTA
+// 1 = L3
+// 2 = L2
+// 3 = L1
+#define PREFETCH_LOCALITY 3
 
-            int j_end = (j0 + BN < N) ? j0 + BN : N;
-            for (int i = i0; i < i_end; i++) {
 
-                
-                for (int j = j0; j < j_end; j += m) {
+static inline void software_prefetch(const float* ptr)
+{
+#if SOFTWARE_PREFETCH
 
-                    int batch = m < (j_end - j)
-                              ? m
-                              : (j_end - j);
+    __builtin_prefetch(
+        ptr,
+        0,                 
+        PREFETCH_LOCALITY  
+    );
 
-                    // AVX2 accumulators
-                    __m256 acc[4];
+#else
 
-                    // Scalar accumulators for K leftovers
-                    float scalar_acc[4] = {
-                        0.0f, 0.0f, 0.0f, 0.0f
-                    };
+    (void)ptr;
 
-                    for (int k = 0; k < batch; k++) {
-                        acc[k] = _mm256_setzero_ps();
-                    }
+#endif
+}
 
-                   
-                    int p = 0;
+void matmul_prefetch(const float* A,
+                     const float* B,
+                     float* C,
+                     int M,
+                     int N,
+                     int K,
+                     int lda,
+                     int ldb,
+                     int ldc)
+{
+    for (int i = 0; i < M; ++i) {
 
-                    for (; p + 7 < K; p += 8) {
-                        if (p + PREFETCH_DISTANCE < K) {
+        for (int j = 0; j < N; ++j) {
 
-                            _mm_prefetch(
-                                (const char*)&A[
-                                    i * lda +
-                                    p + PREFETCH_DISTANCE
-                                ],
-                                _MM_HINT_T0
-                            );
-                        }
-                        if (p + PREFETCH_DISTANCE < K) {
+            float acc = 0.0f;
 
-                            for (int k = 0; k < batch; k++) {
+            const float* a =
+                A + static_cast<long>(i) * lda;
 
-                                _mm_prefetch(
-                                    (const char*)&B[
-                                        (j + k) * ldb +
-                                        p + PREFETCH_DISTANCE
-                                    ],
-                                    _MM_HINT_T0
-                                );
-                            }
-                        }
+            const float* b =
+                B + static_cast<long>(j) * ldb;
 
-                        __m256 a = _mm256_loadu_ps(
-                            &A[i * lda + p]
-                        );
-                        for (int k = 0; k < batch; k++) {
+            for (int p = 0; p < K; ++p) {
 
-                            __m256 b = _mm256_loadu_ps(
-                                &B[(j + k) * ldb + p]
-                            );
+#if SOFTWARE_PREFETCH
 
-                            // Fused multiply-add
-                            acc[k] = _mm256_fmadd_ps(
-                                a,
-                                b,
-                                acc[k]
-                            );
-                        }
-                    }
+                const int pf = p + PREFETCH_DISTANCE;
 
-                    // -----------------------------------------
-                    // Scalar K cleanup
-                    // -----------------------------------------
-                    for (; p < K; p++) {
-
-                        for (int k = 0; k < batch; k++) {
-
-                            scalar_acc[k] +=
-                                A[i * lda + p] *
-                                B[(j + k) * ldb + p];
-                        }
-                    }
-
-                    // -----------------------------------------
-                    // Reduce and store
-                    // -----------------------------------------
-                    for (int k = 0; k < batch; k++) {
-
-                        alignas(32) float temp[8];
-
-                        _mm256_store_ps(
-                            temp,
-                            acc[k]
-                        );
-
-                        float sum = 0.0f;
-
-                        for (int x = 0; x < 8; x++) {
-                            sum += temp[x];
-                        }
-
-                        sum += scalar_acc[k];
-
-                        C[i * ldc + (j + k)] = sum;
-                    }
+                if (pf < K) {
+                    software_prefetch(&a[pf]);
+                    software_prefetch(&b[pf]);
                 }
+
+#endif
+
+                acc += a[p] * b[p];
             }
+
+            C[static_cast<long>(i) * ldc + j] = acc;
         }
     }
 }
-
