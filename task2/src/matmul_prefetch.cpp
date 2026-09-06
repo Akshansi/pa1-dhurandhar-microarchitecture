@@ -5,32 +5,49 @@
 
 #include "matmul.h"
 
-// 0 = Software prefetch OFF
-// 1 = Software prefetch ON
+// 0 = OFF
+// 1 = ON
 #define SOFTWARE_PREFETCH 1
 
 #define PREFETCH_DISTANCE 16
 
-// Cache fill:
-// 0 = NTA
-// 1 = L3
-// 2 = L2
-// 3 = L1
-#define PREFETCH_LOCALITY 3
-
+#define PREFETCH_LEVEL 3
 
 static inline void software_prefetch(const float* ptr)
 {
 #if SOFTWARE_PREFETCH
 
-    __builtin_prefetch(
-        ptr,
-        0,                 
-        PREFETCH_LOCALITY  
+#if PREFETCH_LEVEL == 3
+
+    _mm_prefetch(
+        reinterpret_cast<const char*>(ptr),
+        _MM_HINT_T0
     );
 
-#else
+#elif PREFETCH_LEVEL == 2
 
+    _mm_prefetch(
+        reinterpret_cast<const char*>(ptr),
+        _MM_HINT_T1
+    );
+
+#elif PREFETCH_LEVEL == 1
+
+    _mm_prefetch(
+        reinterpret_cast<const char*>(ptr),
+        _MM_HINT_T2
+    );
+
+#elif PREFETCH_LEVEL == 0
+
+    _mm_prefetch(
+        reinterpret_cast<const char*>(ptr),
+        _MM_HINT_NTA
+    );
+
+#endif
+
+#else
     (void)ptr;
 
 #endif
@@ -58,11 +75,15 @@ void matmul_prefetch(const float* A,
             const float* b =
                 B + static_cast<long>(j) * ldb;
 
+
+            
             for (int p = 0; p < K; ++p) {
 
 #if SOFTWARE_PREFETCH
 
-                const int pf = p + PREFETCH_DISTANCE;
+            
+                const int pf =
+                    p + PREFETCH_DISTANCE;
 
                 if (pf < K) {
                     software_prefetch(&a[pf]);
